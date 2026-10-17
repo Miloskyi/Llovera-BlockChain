@@ -1,0 +1,6 @@
+# Material de referencia y skills del agente (no son parte del proyecto)
+skills/
+Mapa.jpg
+
+node_modules/
+.DS_Store

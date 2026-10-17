@@ -31,6 +31,16 @@ const ZONE_PATHS = ZONE_GEO.map((z) => z.rings.map(ringPath).join(""));
 const RURAL_PATHS = RURAL_GEO.map((r) => r.rings.map(ringPath).join(""));
 const LABELS = ZONE_GEO.map((z) => project(z.label[0], z.label[1]));
 
+/** Parte un nombre largo en dos líneas (tras el guion o en el espacio más cercano al centro). */
+function splitName(name: string): string[] {
+  const dash = name.indexOf("-");
+  if (dash > 0) return [name.slice(0, dash + 1), name.slice(dash + 1)];
+  const spaces = [...name.matchAll(/ /g)].map((m) => m.index!);
+  if (!spaces.length || name.length < 10) return [name];
+  const cut = spaces.reduce((a, b) => (Math.abs(b - name.length / 2) < Math.abs(a - name.length / 2) ? b : a));
+  return [name.slice(0, cut), name.slice(cut + 1)];
+}
+
 // Trazado aproximado del río Medellín (Aburrá), de sur a norte.
 const RIVER = [
   [-75.636, 5.99], [-75.631, 6.06], [-75.624, 6.11], [-75.612, 6.148], [-75.594, 6.184], [-75.58, 6.222], [-75.573, 6.255],
@@ -137,9 +147,19 @@ export function ValleyMap({
     return () => cancelAnimationFrame(raf);
   }, [target]);
 
+  // Ancho real del mapa en pantalla, para que las etiquetas tengan tamaño fijo en píxeles.
+  const [widthPx, setWidthPx] = useState(600);
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => setWidthPx(entry.contentRect.width || 600));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const [bx, by, bw, bh] = box;
   const zoomedIn = bw < 260;
-  const fs = bw / 46; // tamaño de fuente relativo al encuadre
+  const px = bw / widthPx; // unidades del mapa por píxel de pantalla
   const stroke = bw / 600;
 
   function handleClick(e: React.MouseEvent<SVGSVGElement>) {
@@ -257,12 +277,15 @@ export function ValleyMap({
         <path d={RIVER} fill="none" stroke="var(--cyan)" strokeOpacity="0.55" strokeWidth={stroke * 1.6} strokeLinecap="round" pointerEvents="none" />
 
         {/* Etiquetas */}
-        <g pointerEvents="none" style={{ paintOrder: "stroke" }} stroke="var(--bg)" strokeWidth={fs * 0.28} strokeLinejoin="round">
+        {/* Etiquetas en píxeles de pantalla, con halo oscuro para leerse sobre cualquier color de lluvia */}
+        <g pointerEvents="none" stroke="var(--bg)" strokeWidth={3.5 * px} strokeLinejoin="round" strokeOpacity={0.92}>
           {ZONE_GEO.map((z, i) => {
             const comuna = z.area === "Medellín";
             if (comuna && !zoomedIn) return null;
             const [x, y] = LABELS[i];
-            const size = comuna ? fs * 0.62 : fs * (zoomedIn ? 0.62 : 0.78);
+            const narrow = widthPx < 520;
+            const size = (comuna || zoomedIn ? (narrow ? 10.5 : 11.5) : 13) * px;
+            const lines = narrow ? splitName(z.name) : [z.name];
             return (
               <text
                 key={i}
@@ -271,16 +294,31 @@ export function ValleyMap({
                 textAnchor="middle"
                 dominantBaseline="middle"
                 fontSize={size}
-                fontWeight={selected === i ? 800 : 650}
-                fill={selected === i ? "var(--accent)" : "var(--ink)"}
+                fontWeight={selected === i ? 800 : 700}
+                fill={selected === i ? "var(--accent)" : "#fff"}
+                paintOrder="stroke"
                 className="font-display"
               >
-                {z.name}
+                {lines.map((line, k) => (
+                  <tspan key={k} x={x} dy={k === 0 ? `${-(lines.length - 1) * 0.55}em` : "1.1em"}>
+                    {line}
+                  </tspan>
+                ))}
               </text>
             );
           })}
           {!zoomedIn && (
-            <text x={LABELS[10][0] + 8} y={LABELS[10][1]} textAnchor="middle" fontSize={fs * 1.05} fontWeight={800} fill="var(--ink)" className="font-display" letterSpacing={fs * 0.12}>
+            <text
+              x={LABELS[10][0] + 8}
+              y={LABELS[10][1]}
+              textAnchor="middle"
+              fontSize={15 * px}
+              fontWeight={800}
+              fill="#fff"
+              paintOrder="stroke"
+              className="font-display"
+              letterSpacing={1.5 * px}
+            >
               MEDELLÍN
             </text>
           )}
@@ -289,17 +327,17 @@ export function ValleyMap({
         {youXY && (
           <g pointerEvents="none">
             <circle cx={youXY[0]} cy={youXY[1]} r={4} fill="none" stroke="var(--cyan)" strokeWidth={stroke * 2} className="gps-ring" style={{ transformBox: "fill-box" }} />
-            <circle cx={youXY[0]} cy={youXY[1]} r={bw / 110} fill="var(--cyan)" stroke="var(--bg)" strokeWidth={stroke * 2} />
+            <circle cx={youXY[0]} cy={youXY[1]} r={6 * px} fill="var(--cyan)" stroke="var(--bg)" strokeWidth={stroke * 2} />
             <text
               x={youXY[0]}
-              y={youXY[1] - bw / 45}
+              y={youXY[1] - 14 * px}
               textAnchor="middle"
-              fontSize={fs * 0.62}
+              fontSize={12 * px}
               fontWeight={800}
               fill="var(--cyan)"
               stroke="var(--bg)"
-              strokeWidth={fs * 0.25}
-              style={{ paintOrder: "stroke" }}
+              strokeWidth={3.5 * px}
+              paintOrder="stroke"
               className="font-data"
             >
               {you?.simulated ? "TÚ (SIM)" : "TÚ"}

@@ -1,5 +1,5 @@
 import { createConfig, http } from "wagmi";
-import { injected } from "wagmi/connectors";
+import { injected, metaMask } from "wagmi/connectors";
 import { foundry, monadTestnet } from "viem/chains";
 import type { Address } from "viem";
 
@@ -15,7 +15,12 @@ export const contractsConfigured = LLOVERA_ADDRESS.startsWith("0x") && USDC_ADDR
 
 export const wagmiConfig = createConfig({
   chains: [chain],
-  connectors: [injected({ target: "metaMask" })],
+  // injected: extensión de escritorio o navegador interno de MetaMask.
+  // metaMask (SDK): Chrome/Safari del celular, abre la app para aprobar y vuelve a la página.
+  connectors: [
+    injected({ target: "metaMask" }),
+    metaMask({ dappMetadata: { name: "Lloverá", url: "https://llovera-kappa.vercel.app" } }),
+  ],
   transports: { [monadTestnet.id]: http(rpcUrl), [foundry.id]: http(rpcUrl) },
   ssr: true,
 });

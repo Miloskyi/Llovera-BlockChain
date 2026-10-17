@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 import { useAccount, useBalance, useConnect, useDisconnect, useSwitchChain } from "wagmi";
 import { formatEther } from "viem";
-import { chain } from "@/lib/config";
+import { chain, rpcUrl } from "@/lib/config";
 import { shortAddr } from "@/lib/format";
+import { Sheet } from "./Sheet";
 
 const isMobile = () => typeof navigator !== "undefined" && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
@@ -16,6 +17,7 @@ export function ConnectButton({ size = "md", compact = false }: { size?: "md" | 
   const { connect, connectors, isPending } = useConnect();
   const { disconnect } = useDisconnect();
   const { switchChain, isPending: switching } = useSwitchChain();
+  const [help, setHelp] = useState(false);
   const { data: mon } = useBalance({ address, query: { enabled: !!address, refetchInterval: 5000 } });
   const big = size === "lg" ? "btn-xl w-full" : "";
 
@@ -23,18 +25,18 @@ export function ConnectButton({ size = "md", compact = false }: { size?: "md" | 
 
   if (!isConnected) {
     const hasWallet = "ethereum" in window;
-    if (!hasWallet) {
-      // En el celular, abrir la página dentro del navegador de la app de MetaMask.
-      const href = isMobile() ? `https://metamask.app.link/dapp/${location.host}${location.pathname}` : "https://metamask.io/download/";
+    if (!hasWallet && !isMobile()) {
       return (
-        <a className={`btn btn-accent ${big}`} href={href} target={isMobile() ? undefined : "_blank"} rel="noreferrer">
+        <a className={`btn btn-accent ${big}`} href="https://metamask.io/download/" target="_blank" rel="noreferrer">
           <MetaMaskGlyph />
-          {isMobile() ? (compact ? "Abrir" : "Abrir en MetaMask") : compact ? "MetaMask" : "Instalar MetaMask"}
+          {compact ? "MetaMask" : "Instalar MetaMask"}
         </a>
       );
     }
+    // Sin wallet inyectada en el celular: el SDK abre la app de MetaMask para aprobar y regresa aquí.
+    const connector = hasWallet ? connectors.find((c) => c.type === "injected") : connectors.find((c) => c.type === "metaMask");
     return (
-      <button className={`btn btn-accent ${big}`} disabled={isPending} onClick={() => connect({ connector: connectors[0], chainId: chain.id })}>
+      <button className={`btn btn-accent ${big}`} disabled={isPending} onClick={() => connect({ connector: connector ?? connectors[0], chainId: chain.id })}>
         {isPending ? <span className="mini-spin" /> : <MetaMaskGlyph />}
         {isPending ? "Conectando…" : compact ? "Conectar" : "Conectar MetaMask"}
       </button>
@@ -42,11 +44,21 @@ export function ConnectButton({ size = "md", compact = false }: { size?: "md" | 
   }
 
   if (chainId !== chain.id) {
+    // En el celular MetaMask a veces se abre sin mostrar la solicitud: dejamos los pasos manuales a mano.
+    const trySwitch = () => {
+      switchChain({ chainId: chain.id });
+      if (isMobile()) setHelp(true);
+    };
     return (
-      <button className={`btn btn-storm ${big}`} disabled={switching} onClick={() => switchChain({ chainId: chain.id })}>
-        {switching && <span className="mini-spin" />}
-        {switching ? "Cambiando…" : compact ? "Cambiar red" : `Cambiar a ${chain.name}`}
-      </button>
+      <>
+        <button className={`btn btn-storm ${big}`} onClick={trySwitch}>
+          {switching && <span className="mini-spin" />}
+          {switching ? "Cambiando…" : compact ? "Cambiar red" : `Cambiar a ${chain.name}`}
+        </button>
+        <Sheet open={help} onClose={() => setHelp(false)} label={`Cambiar a ${chain.name}`}>
+          <SwitchHelp onRetry={() => switchChain({ chainId: chain.id })} />
+        </Sheet>
+      </>
     );
   }
 
@@ -58,6 +70,57 @@ export function ConnectButton({ size = "md", compact = false }: { size?: "md" | 
       <button className={`btn btn-ghost font-data ${big} ${compact ? "px-3" : ""}`} onClick={() => disconnect()} title="Desconectar">
         <span className="live-dot" />
         {compact ? `${address?.slice(0, 5)}…${address?.slice(-3)}` : shortAddr(address)}
+      </button>
+    </div>
+  );
+}
+
+function SwitchHelp({ onRetry }: { onRetry: () => void }) {
+  // Con el SDK la página está en Chrome/Safari; con injected ya estamos dentro de MetaMask.
+  const inMetaMask = useAccount().connector?.type === "injected";
+  const openInMetaMask = `https://link.metamask.io/dapp/${location.host}${location.pathname}`;
+  const fields = [
+    ["Nombre de la red", chain.name],
+    ["URL de RPC", rpcUrl],
+    ["ID de cadena", String(chain.id)],
+    ["Símbolo", chain.nativeCurrency.symbol],
+    ["Explorador", chain.blockExplorers?.default.url ?? ""],
+  ];
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="font-display text-2xl font-extrabold">Cambia a {chain.name}</h2>
+        <p className="mt-1 text-base text-muted">
+          Te enviamos la solicitud a MetaMask. Si la app se abrió y no te mostró nada, hazlo a mano. Al volver, la página se actualiza sola.
+        </p>
+      </div>
+      {!inMetaMask && (
+        <a className="btn btn-accent btn-xl w-full" href={openInMetaMask}>
+          <MetaMaskGlyph /> Abrir Lloverá dentro de MetaMask
+        </a>
+      )}
+      <ol className="list-decimal space-y-1 pl-5 text-base text-muted">
+        <li>En MetaMask, toca el selector de red arriba.</li>
+        <li>
+          Busca <b className="text-ink">{chain.name}</b> y selecciónala.
+        </li>
+        <li>Si no aparece, toca «Agregar red personalizada» y copia estos datos:</li>
+      </ol>
+      <div className="divide-y divide-line rounded-2xl border border-line">
+        {fields.map(([label, value]) => (
+          <button
+            key={label}
+            className="flex min-h-12 w-full items-center justify-between gap-3 px-4 py-2 text-left"
+            onClick={() => navigator.clipboard?.writeText(value).catch(() => {})}
+          >
+            <span className="text-sm text-dim">{label}</span>
+            <span className="font-data min-w-0 truncate text-sm">{value}</span>
+            <span className="text-xs text-cyan">Copiar</span>
+          </button>
+        ))}
+      </div>
+      <button className="btn btn-ghost w-full" onClick={onRetry}>
+        Volver a intentar
       </button>
     </div>
   );
